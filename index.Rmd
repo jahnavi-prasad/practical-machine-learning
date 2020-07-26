@@ -1,0 +1,201 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "GeoRic"
+date: "7/25/2020"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+This publication represents the write up for the John Hopkins University Practical Machine Learning course project on Coursera. The goal of this project is to use a set of provided training and test data to predict the manner in which a set of exercises were conducted. The report will describe how the model was built, how cross validation was used, the expected out of sample errors and reasoning behind the choice. The model will be used to predict 20 different test cases.
+
+# Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different way. This included one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+More information is available from the website [here]( http://groupware.les.inf.puc-rio.br/har) (see references). 
+
+# Data
+The data for this project, referred to as the ‘Weight Lifting Exercises (WLE) dataset’ comes from this source: http://groupware.les.inf.puc-rio.br/ha.
+
+
+The training data for this project are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv).  
+The test data are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+## Data Loading and Processing
+**Loading required R libraries**
+```{r, echo = TRUE, warning=FALSE, message=FALSE}
+rm(list=ls())
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
+library(e1071)
+library(gbm)
+set.seed(12345)
+```
+
+**Data Loading**  
+```{r}
+#Training
+url_train <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+training <- read.csv(url(url_train))
+#Testing
+url_test  <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+testing  <- read.csv(url(url_test))
+```
+
+**Create Partition for Training and Testing Data Sets**  
+70% Training, 30% Testing  
+```{r}
+training_classe_par  <- createDataPartition(training$classe, p=0.7, list=FALSE)
+train_set <- training[training_classe_par, ]
+test_set  <- training[-training_classe_par, ]
+dim(train_set); dim(test_set)
+```
+
+**Data Cleaning**  
+**Removing variable with Nearly Zero Variance**    
+```{r}
+near_zero_varience <- nearZeroVar(train_set)
+train_set <- train_set[, -near_zero_varience]
+test_set  <- test_set[, -near_zero_varience]
+dim(train_set); dim(test_set)
+```
+
+**Removing NA values**  
+```{r}
+na_values    <- sapply(train_set, function(x) mean(is.na(x))) > 0.95
+train_set <- train_set[, na_values==FALSE]
+test_set  <- test_set[, na_values==FALSE]
+dim(train_set); dim(test_set)
+```
+
+**Remove variables without usable information**  
+```{r}
+train_set <- train_set[, -c(1:5)]
+test_set <- test_set[, -c(1:5)]
+```
+
+**Variables for analysis after data cleaning**  
+```{r}
+dim(train_set); dim(test_set)
+```
+
+**Finding the correlated variables**
+```{r}
+correlation_matrix <- cor(train_set[, -54])
+corrplot(correlation_matrix, order = "FPC", method = "color", type = "upper", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+
+**Distinguising the highly correlated variables using a cutoff value of 0.70**  
+```{r}
+highly_correlated = findCorrelation(correlation_matrix, cutoff=0.70)
+names(train_set)[highly_correlated]
+```
+
+# Prediction Modelling  
+In this section models including Random Forest, Discision Tree and the General Boosted methods would be used to build prediction models. The intention is to determine a model fit, apply a prediction on the test dataset then determine the accuracy by plotting a confusion matrix of the prediction results.  
+
+## Random Forest Tree  
+
+```{r}
+# Random Forest model fit
+library(e1071)
+set.seed(12345)
+control_random_forest <-   trainControl(method="cv", number=3, verboseIter=FALSE)
+model_fit_random_forest <- train(classe ~ ., data=train_set, method="rf",
+                            trControl=control_random_forest)
+
+# Prediction on Test dataset
+predict_random_forest <- predict(model_fit_random_forest, newdata = test_set)
+test_set_factor <- as.factor(test_set$classe)
+confusion_matrix_random_forest <- confusionMatrix(predict_random_forest, test_set_factor)
+confusion_matrix_random_forest
+```
+
+
+**Test for Random Forest model accuracy**  
+```{r}
+# Confusion matrix plot for model accuracy
+plot(confusion_matrix_random_forest$table, col = confusion_matrix_random_forest$byClass, 
+     main = paste("Random Forest - Accuracy =",
+                  round(confusion_matrix_random_forest$overall['Accuracy'], 4)))
+
+```
+
+
+## Decision Tree  
+
+```{r}
+#Decision Tree model fit
+set.seed(12345)
+model_fit_decision_tree <- rpart(classe ~ ., data=train_set, method="class")
+fancyRpartPlot(model_fit_decision_tree)
+
+# Prediction on Test dataset
+predict_decision_tree <- predict(model_fit_decision_tree, newdata=test_set, type="class")
+test_set_factor <- as.factor(test_set$classe)
+confusion_matrix_decision_tree <- confusionMatrix(predict_decision_tree, test_set_factor)
+confusion_matrix_decision_tree
+
+```
+
+**Test for Decision Tree model accuracy**  
+```{r}
+# Confusion matrix plot for model accuracy
+plot(confusion_matrix_decision_tree$table, col = confusion_matrix_decision_tree$byClass, 
+     main = paste("Decision Tree - Accuracy =",
+                  round(confusion_matrix_decision_tree$overall['Accuracy'], 4)))
+```
+
+## General Boosted Method
+
+```{r}
+# General Boosted model fit
+library(gbm)
+set.seed(12345)
+control_gbm <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+model_fit_gbm  <- train(classe ~ ., data=train_set, method = "gbm",
+                    trControl = control_gbm, verbose = FALSE)
+
+# Prediction on Test dataset
+predict_gbm <- predict(model_fit_gbm, newdata=test_set)
+test_set_factor <- as.factor(test_set$classe)
+confusion_matrix_gbm <- confusionMatrix(predict_gbm, test_set_factor)
+confusion_matrix_gbm
+```
+
+**Test for General Boosted Method model accuracy**  
+```{r}
+# Confusion matrix plot for model accuracy
+plot(confusion_matrix_gbm$table, col = confusion_matrix_gbm$byClass, 
+     main = paste("General Boosted Method - Accuracy =", round(confusion_matrix_gbm$overall['Accuracy'], 4)))
+```
+
+## Applying the most accurate model for testing    
+The accuracy of the regression models are:  
+- Random Forest: **0.9975**  
+- Decision Tree: **0.7276**  
+- General Boosted Method: **0.9910**   
+
+Based on these results, the model closest to the value 1 is Random Forest and is therefore reflective of being the most accurate model. As such, Random Forest will be used to predict the quiz results from the original 'testing' dataset. The prediction is as follows:   
+
+```{r}
+test_prediction <- predict(model_fit_random_forest, newdata=testing)
+test_prediction
+```
+
+
+# References  
+*Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.*
